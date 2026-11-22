@@ -54,6 +54,8 @@ add_executable(IndustrialVisionQt
     src/ui/MainWindow.h
     src/ui/BatchWorker.cpp
     src/ui/BatchWorker.h
+    src/ui/LiveWorker.cpp
+    src/ui/LiveWorker.h
   )
 
 set_target_properties(IndustrialVisionQt PROPERTIES AUTOMOC ON)

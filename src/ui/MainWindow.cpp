@@ -2,6 +2,8 @@
 #include "BatchWorker.h"
 
 #include "industrial_vision/TraditionalInspector.h"
+#include "LiveWorker.h"
+
 #include <QHBoxLayout>
 #include <QFileDialog>
 #include <QImage>
@@ -48,6 +50,34 @@ MainWindow::MainWindow(QWidget* parent)
     stopButton_ = new QPushButton("停止批量检测", this);
     stopButton_->setEnabled(false);
     layout->addWidget(stopButton_);
+
+    liveButton_ = new QPushButton("启动连续检测", this);
+    liveStopButton_ = new QPushButton("停止连续检测", this);
+    liveStopButton_->setEnabled(false);
+
+    layout->addWidget(liveButton_);
+    layout->addWidget(liveStopButton_);
+
+    connect(liveButton_, &QPushButton::clicked,
+        this, [this]() { runLive(); });
+
+    connect(liveStopButton_, &QPushButton::clicked,
+        this, [this]() {
+            if (liveWorker_) {
+                liveWorker_->requestStop();
+                liveStopButton_->setEnabled(false);
+                fileLabel_->setText("正在停止连续检测...");
+            }
+        });
+
+    connect(&liveThread_, &QThread::finished, this, [this]() {
+        liveWorker_ = nullptr;
+        liveButton_->setEnabled(true);
+        liveStopButton_->setEnabled(false);
+        batchButton_->setEnabled(true);
+        nextButton_->setEnabled(!currentFolder_.empty());
+        modeCombo_->setEnabled(true);
+        });
 
     connect(stopButton_, &QPushButton::clicked, this, [this]() {
         if (batchThread_.isRunning() && batchWorker_) {
@@ -102,7 +132,85 @@ MainWindow::~MainWindow()
         batchThread_.quit();
         batchThread_.wait();
     }
+    if (liveThread_.isRunning()) {
+        if (liveWorker_) {
+            liveWorker_->requestStop();
+        }
+        liveThread_.quit();
+        liveThread_.wait();
+    }
 }
+
+void MainWindow::runLive()
+{
+    if (currentFolder_.empty()) {
+        QMessageBox::information(
+            this, "连续检测", "请先选择图片文件夹");
+        return;
+    }
+    if (liveThread_.isRunning() || batchThread_.isRunning()) {
+        return;
+    }
+    if (modeCombo_->currentIndex() != 1) {
+        QMessageBox::information(
+            this, "连续检测", "本阶段请先选择 YOLO 模式");
+        return;
+    }
+
+    const QString folder =
+        QString::fromStdWString(currentFolder_.wstring());
+    const QString modelPath = QString::fromStdWString(
+        LR"(T:\MyCode_qt\study\models\NEU-DET-YOLOv8n\neu_det_yolov8n_best.onnx)"
+    );
+    constexpr int intervalMs = 100;
+
+    auto* worker = new LiveWorker;
+    liveWorker_ = worker;
+    worker->moveToThread(&liveThread_);
+
+    connect(&liveThread_, &QThread::started, worker,
+        [worker, folder, modelPath]() {
+            worker->process(folder, modelPath, intervalMs);
+        });
+
+    // 这个接收函数在界面线程执行，只有这里修改 QLabel。
+    connect(worker, &LiveWorker::previewReady, this,
+        [this](const QImage& original,
+            const QImage& marked,
+            const QString& status) {
+                originalLabel_->setPixmap(
+                    QPixmap::fromImage(original).scaled(
+                        400, 650, Qt::KeepAspectRatio,
+                        Qt::SmoothTransformation));
+                imageLabel_->setPixmap(
+                    QPixmap::fromImage(marked).scaled(
+                        400, 650, Qt::KeepAspectRatio,
+                        Qt::SmoothTransformation));
+                fileLabel_->setText(status);
+        });
+
+    connect(worker, &LiveWorker::finished, this,
+        [this](const QString& summary, bool fault) {
+            fileLabel_->setText(summary);
+            if (fault) {
+                QMessageBox::warning(
+                    this, "连续检测故障", summary);
+            }
+            liveThread_.quit();
+        });
+
+    connect(&liveThread_, &QThread::finished,
+        worker, &QObject::deleteLater);
+
+    liveButton_->setEnabled(false);
+    liveStopButton_->setEnabled(true);
+    batchButton_->setEnabled(false);
+    nextButton_->setEnabled(false);
+    modeCombo_->setEnabled(false);
+    fileLabel_->setText("连续检测启动中...");
+    liveThread_.start();
+}
+
 void MainWindow::openFolder()
 {
     const QString folder =

@@ -11,6 +11,7 @@ class QComboBox;
 class QLabel;
 class QPushButton;
 
+class LiveWorker;
 class BatchWorker;
 
 class MainWindow : public QWidget {
@@ -23,6 +24,7 @@ private:
     void showNextFrame();
 
     void runBatch();
+    void runLive();
 
     std::filesystem::path currentFolder_;
     QPushButton* batchButton_ = nullptr;
@@ -44,4 +46,9 @@ private:
     QThread batchThread_;
     BatchWorker* batchWorker_ = nullptr;
     QPushButton* stopButton_ = nullptr;
+
+    QThread liveThread_;
+    LiveWorker* liveWorker_ = nullptr;
+    QPushButton* liveButton_ = nullptr;
+    QPushButton* liveStopButton_ = nullptr;
 };
